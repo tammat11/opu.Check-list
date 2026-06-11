@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { Pool } from "pg";
+import authRoutes from "./routes/auth";
 
 dotenv.config();
 
@@ -23,35 +24,7 @@ app.get("/health", (req, res) => {
 });
 
 // Auth routes
-app.post("/api/auth/register", async (req, res) => {
-  try {
-    const { email, password, name } = req.body;
-
-    if (!email || !password || !name) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-
-    // TODO: Hash password and create user in database
-    res.status(201).json({ message: "User registered successfully" });
-  } catch (error) {
-    res.status(500).json({ error: "Registration failed" });
-  }
-});
-
-app.post("/api/auth/login", async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ error: "Missing credentials" });
-    }
-
-    // TODO: Verify credentials and issue JWT token
-    res.json({ token: "jwt-token-here" });
-  } catch (error) {
-    res.status(500).json({ error: "Login failed" });
-  }
-});
+app.use("/api/auth", authRoutes);
 
 // Checklist routes
 app.get("/api/checklists", async (req, res) => {
