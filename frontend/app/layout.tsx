@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "OPU Checklist - Cleaning Made Simple",
-  description: "Easy-to-use cleaning checklist app",
+  title: "OPU Check-list - IC Group",
+  description: "Система управления уборкой от IC Group",
 };
 
 export default function RootLayout({
@@ -12,12 +12,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="ru">
       <head>
-        <meta name="theme-color" content="#ffffff" />
+        <meta name="theme-color" content="#7EC850" />
         <link rel="manifest" href="/manifest.json" />
       </head>
-      <body className="bg-gray-50">
+      <body className="bg-white">
         {children}
       </body>
     </html>

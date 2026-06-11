@@ -164,8 +164,13 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">OPU Checklist</h1>
-          <p className="text-lg text-gray-600">Вход в систему</p>
+          <div className="flex items-center justify-center gap-2 mb-4">
+            <span className="text-4xl font-bold">
+              <span className="text-ic-green">ic</span>
+              <span className="text-gray-400">group</span>
+            </span>
+          </div>
+          <p className="text-lg text-gray-600">OPU Check-list — Вход в систему</p>
         </div>
 
         {/* Check User Step */}

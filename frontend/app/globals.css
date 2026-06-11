@@ -5,6 +5,8 @@
 body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background-color: #ffffff;
+  color: #1a1a1a;
 }
 
 button {
@@ -13,13 +15,26 @@ button {
 
 /* Large buttons for accessibility */
 .btn-large {
-  @apply px-8 py-4 text-lg rounded-lg font-semibold;
+  @apply px-8 py-4 text-lg rounded-full font-semibold;
 }
 
 .btn-primary {
-  @apply btn-large bg-blue-600 text-white hover:bg-blue-700;
+  @apply btn-large bg-ic-green text-white hover:bg-green-600 shadow-sm;
 }
 
 .btn-secondary {
-  @apply btn-large bg-gray-200 text-gray-800 hover:bg-gray-300;
+  @apply btn-large bg-gray-100 text-ic-dark hover:bg-gray-200 border-2 border-gray-200;
+}
+
+.btn-outline {
+  @apply btn-large border-2 border-ic-dark text-ic-dark hover:bg-ic-dark hover:text-white;
+}
+
+/* IC Group branding */
+.ic-logo {
+  @apply text-4xl font-bold;
+}
+
+.ic-green-text {
+  @apply text-ic-green;
 }

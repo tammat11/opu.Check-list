@@ -8,10 +8,16 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      colors: {
+        'ic-green': '#7EC850',
+        'ic-dark': '#1a1a1a',
+      },
       fontSize: {
         'xl': '1.25rem',
         '2xl': '1.5rem',
         '3xl': '2rem',
+        '4xl': '2.5rem',
+        '5xl': '3rem',
       },
       spacing: {
         '6': '1.5rem',
