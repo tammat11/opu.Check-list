@@ -80,12 +80,11 @@ export default function Home() {
               </button>
             )}
             {notificationEnabled && (
-              <button
-                disabled
-                className="btn-primary w-full opacity-50 cursor-not-allowed"
-              >
-                Notifications Active
-              </button>
+              <div className="text-center">
+                <p className="text-green-600 font-semibold text-lg">
+                  ✓ Уведомления активны
+                </p>
+              </div>
             )}
           </div>
         )}

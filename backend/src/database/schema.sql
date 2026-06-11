@@ -11,28 +11,73 @@ CREATE TABLE IF NOT EXISTS users (
   status VARCHAR(50) DEFAULT 'active',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT valid_role CHECK (role IN ('partner', 'curator', 'cleaner'))
+  CONSTRAINT valid_role CHECK (role IN ('admin', 'partner', 'curator', 'cleaner'))
 );
 
--- Checklists table
-CREATE TABLE IF NOT EXISTS checklists (
+-- Objects (Cleaning locations)
+CREATE TABLE IF NOT EXISTS objects (
   id SERIAL PRIMARY KEY,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  title VARCHAR(255) NOT NULL,
-  description TEXT,
-  completed BOOLEAN DEFAULT FALSE,
+  name VARCHAR(255) NOT NULL,
+  address TEXT,
+  city VARCHAR(100),
+  partner_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  created_by INTEGER REFERENCES users(id),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Checklist items table
-CREATE TABLE IF NOT EXISTS checklist_items (
+-- Checklist templates (Templates created by admin/partner)
+CREATE TABLE IF NOT EXISTS checklist_templates (
   id SERIAL PRIMARY KEY,
-  checklist_id INTEGER NOT NULL REFERENCES checklists(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  description TEXT,
+  created_by INTEGER NOT NULL REFERENCES users(id),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Template items (Items within a template)
+CREATE TABLE IF NOT EXISTS template_items (
+  id SERIAL PRIMARY KEY,
+  template_id INTEGER NOT NULL REFERENCES checklist_templates(id) ON DELETE CASCADE,
   title VARCHAR(255) NOT NULL,
-  completed BOOLEAN DEFAULT FALSE,
   order_index INTEGER,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Checklist assignments (Which template applies to which object)
+CREATE TABLE IF NOT EXISTS checklist_assignments (
+  id SERIAL PRIMARY KEY,
+  template_id INTEGER NOT NULL REFERENCES checklist_templates(id) ON DELETE CASCADE,
+  object_id INTEGER REFERENCES objects(id) ON DELETE CASCADE,
+  is_default BOOLEAN DEFAULT FALSE,
+  assigned_by INTEGER NOT NULL REFERENCES users(id),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT unique_assignment UNIQUE NULLS NOT DISTINCT (template_id, object_id)
+);
+
+-- Active checklists (Assigned to cleaners for specific shifts)
+CREATE TABLE IF NOT EXISTS active_checklists (
+  id SERIAL PRIMARY KEY,
+  template_id INTEGER NOT NULL REFERENCES checklist_templates(id),
+  object_id INTEGER NOT NULL REFERENCES objects(id),
+  assigned_to INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  assigned_by INTEGER NOT NULL REFERENCES users(id),
+  status VARCHAR(50) DEFAULT 'pending',
+  due_date TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  completed_at TIMESTAMP,
+  CONSTRAINT valid_status CHECK (status IN ('pending', 'in_progress', 'completed'))
+);
+
+-- Checklist progress tracking
+CREATE TABLE IF NOT EXISTS checklist_progress (
+  id SERIAL PRIMARY KEY,
+  checklist_id INTEGER NOT NULL REFERENCES active_checklists(id) ON DELETE CASCADE,
+  item_id INTEGER NOT NULL REFERENCES template_items(id),
+  completed BOOLEAN DEFAULT FALSE,
+  completed_at TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Push subscriptions table
@@ -101,13 +146,22 @@ CREATE TABLE IF NOT EXISTS shift_locations (
 );
 
 -- Create indexes for better query performance
-CREATE INDEX IF NOT EXISTS idx_checklists_user_id ON checklists(user_id);
-CREATE INDEX IF NOT EXISTS idx_checklist_items_checklist_id ON checklist_items(checklist_id);
+CREATE INDEX IF NOT EXISTS idx_objects_partner_id ON objects(partner_id);
+CREATE INDEX IF NOT EXISTS idx_objects_created_by ON objects(created_by);
+CREATE INDEX IF NOT EXISTS idx_checklist_templates_created_by ON checklist_templates(created_by);
+CREATE INDEX IF NOT EXISTS idx_template_items_template_id ON template_items(template_id);
+CREATE INDEX IF NOT EXISTS idx_checklist_assignments_template_id ON checklist_assignments(template_id);
+CREATE INDEX IF NOT EXISTS idx_checklist_assignments_object_id ON checklist_assignments(object_id);
+CREATE INDEX IF NOT EXISTS idx_active_checklists_assigned_to ON active_checklists(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_active_checklists_assigned_by ON active_checklists(assigned_by);
+CREATE INDEX IF NOT EXISTS idx_active_checklists_status ON active_checklists(status);
+CREATE INDEX IF NOT EXISTS idx_checklist_progress_checklist_id ON checklist_progress(checklist_id);
 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_locations_user_id ON user_locations(user_id);
 CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
 CREATE INDEX IF NOT EXISTS idx_users_iin ON users(iin);
 CREATE INDEX IF NOT EXISTS idx_users_parent_id ON users(parent_id);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 CREATE INDEX IF NOT EXISTS idx_browser_fingerprints_user_id ON browser_fingerprints(user_id);
 CREATE INDEX IF NOT EXISTS idx_approval_requests_from ON approval_requests(requested_from_id);
 CREATE INDEX IF NOT EXISTS idx_approval_requests_by ON approval_requests(requested_by_id);

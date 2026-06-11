@@ -3,6 +3,8 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { Pool } from "pg";
 import authRoutes from "./routes/auth";
+import objectsRoutes from "./routes/objects";
+import checklistRoutes from "./routes/checklists";
 
 dotenv.config();
 
@@ -25,6 +27,12 @@ app.get("/health", (req, res) => {
 
 // Auth routes
 app.use("/api/auth", authRoutes);
+
+// Objects routes
+app.use("/api/objects", objectsRoutes);
+
+// Checklist routes
+app.use("/api/checklists", checklistRoutes);
 
 // Checklist routes
 app.get("/api/checklists", async (req, res) => {
