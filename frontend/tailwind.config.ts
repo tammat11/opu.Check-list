@@ -11,6 +11,19 @@ const config: Config = {
       colors: {
         'ic-green': '#7EC850',
         'ic-dark': '#1a1a1a',
+        'brand-green': '#8fc640',
+        'brand-dark': '#1A1D1E',
+        'brand-light': '#FFFFFF',
+        'brand-accent': '#E8F0E5',
+        'brand-secondary': '#7B85A7',
+      },
+      fontFamily: {
+        sans: ['Montserrat', 'Roboto', 'system-ui', '-apple-system', 'sans-serif'],
+      },
+      boxShadow: {
+        premium: '0 4px 20px rgba(0,0,0,0.03), 0 1px 2px rgba(0,0,0,0.02)',
+        glass: '0 20px 40px rgba(0,0,0,0.04)',
+        button: '0 10px 40px rgba(143,198,64,0.2)',
       },
       fontSize: {
         'xl': '1.25rem',

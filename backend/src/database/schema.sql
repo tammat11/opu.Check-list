@@ -94,9 +94,14 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 CREATE TABLE IF NOT EXISTS notifications (
   id SERIAL PRIMARY KEY,
   user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  checklist_id INTEGER REFERENCES active_checklists(id) ON DELETE SET NULL,
   title VARCHAR(255) NOT NULL,
   message TEXT NOT NULL,
+  notification_type VARCHAR(50),
+  scheduled_for TIMESTAMP,
   sent BOOLEAN DEFAULT FALSE,
+  sent_at TIMESTAMP,
+  metadata JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -157,6 +162,9 @@ CREATE INDEX IF NOT EXISTS idx_active_checklists_assigned_by ON active_checklist
 CREATE INDEX IF NOT EXISTS idx_active_checklists_status ON active_checklists(status);
 CREATE INDEX IF NOT EXISTS idx_checklist_progress_checklist_id ON checklist_progress(checklist_id);
 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_unique_checklist_type_user
+ON notifications(user_id, checklist_id, notification_type)
+WHERE checklist_id IS NOT NULL AND notification_type IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_user_locations_user_id ON user_locations(user_id);
 CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
 CREATE INDEX IF NOT EXISTS idx_users_iin ON users(iin);

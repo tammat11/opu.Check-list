@@ -1,20 +1,21 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import { Pool } from "pg";
 import authRoutes from "./routes/auth";
 import objectsRoutes from "./routes/objects";
 import checklistRoutes from "./routes/checklists";
+import { db } from "./db";
+import {
+  configureWebPush,
+  ensureNotificationSchema,
+  sendBroadcastNotification,
+  startReminderScheduler,
+} from "./push";
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-
-// Database connection
-export const db = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
 
 // Middleware
 app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
@@ -62,13 +63,30 @@ app.post("/api/checklists", async (req, res) => {
 // Push notification subscription
 app.post("/api/subscribe", async (req, res) => {
   try {
-    const { subscription } = req.body;
+    const { subscription, userId } = req.body;
 
-    if (!subscription) {
-      return res.status(400).json({ error: "Subscription required" });
+    if (!subscription?.endpoint || !subscription?.keys?.auth || !subscription?.keys?.p256dh) {
+      return res.status(400).json({ error: "Valid subscription required" });
     }
 
-    // TODO: Store subscription in database
+    const resolvedUserId = Number(userId || 1);
+
+    await db.query(
+      `INSERT INTO push_subscriptions (user_id, endpoint, auth_key, p256dh_key)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (endpoint)
+       DO UPDATE SET
+         user_id = EXCLUDED.user_id,
+         auth_key = EXCLUDED.auth_key,
+         p256dh_key = EXCLUDED.p256dh_key`,
+      [
+        resolvedUserId,
+        subscription.endpoint,
+        subscription.keys.auth,
+        subscription.keys.p256dh,
+      ]
+    );
+
     res.status(201).json({ message: "Subscription stored" });
   } catch (error) {
     res.status(500).json({ error: "Failed to store subscription" });
@@ -84,8 +102,8 @@ app.post("/api/notify", async (req, res) => {
       return res.status(400).json({ error: "Title and message required" });
     }
 
-    // TODO: Send push notification to all subscribed users
-    res.json({ message: "Notification sent" });
+    const result = await sendBroadcastNotification(title, message);
+    res.json({ message: "Notification sent", ...result });
   } catch (error) {
     res.status(500).json({ error: "Failed to send notification" });
   }
@@ -123,6 +141,17 @@ app.get("/api/admin/stats", async (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+async function bootstrap() {
+  configureWebPush();
+  await ensureNotificationSchema();
+  startReminderScheduler();
+
+  app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
+  });
+}
+
+bootstrap().catch((error) => {
+  console.error("Server bootstrap failed:", error);
+  process.exit(1);
 });

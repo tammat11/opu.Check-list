@@ -11,7 +11,7 @@ import {
   approveRequest,
   rejectRequest,
 } from "../auth";
-import { db } from "../server";
+import { db } from "../db";
 
 const router = Router();
 

@@ -41,6 +41,32 @@ A simple, elderly-friendly cleaning checklist application with Web Push notifica
 └── README.md
 ```
 
+## Frontend UI Status
+
+- `/` - marketing landing
+- `/auth/login` - branded auth flow with 4 steps: check, password, register, request
+- `/app/dashboard` - branded operator dashboard
+- `/app/admin` - branded admin area with notification box and checklist manager
+- `/app/work` - branded cleaner work mode with compact shift briefing
+- `/checklist` - branded personal checklist screen
+
+## Frontend Notes
+
+- Main visual language now lives around the `brand-*` palette in `frontend/tailwind.config.ts`.
+- Shared app chrome for inner screens is in `frontend/app/components/AppChrome.tsx`.
+- `/app/work` still has its own local `AdminNavbar` inside `frontend/app/app/work/page.tsx`; if top nav breaks there, check that file first.
+- Push bootstrap lives in `frontend/app/components/PushBootstrap.tsx`: it registers `sw.js`, subscribes with `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, and in preview mode falls back to `userId = 1`.
+- The frontend dev script explicitly disables Next Segment Explorer because it was breaking dev HMR with missing chunk errors like `611.js` / `833.js`.
+- `frontend/next.config.ts` pins `outputFileTracingRoot` to the frontend folder to avoid incorrect workspace-root inference on this machine.
+
+## Backend Notes
+
+- Real push sending now lives in `backend/src/push.ts`.
+- The backend polls every 60 seconds and sends an automatic reminder 5 minutes before `active_checklists.due_date`.
+- `POST /api/subscribe` now stores real browser push subscriptions.
+- `POST /api/notify` now sends a real broadcast through Web Push instead of frontend-only preview.
+- Existing databases are patched on server start with `ensureNotificationSchema()`, because the repo currently has no working `backend/src/database/migrate.ts` despite the npm script reference.
+
 ## Quick Start
 
 ### Prerequisites

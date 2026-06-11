@@ -89,31 +89,40 @@ export function ChecklistsManager() {
   };
 
   if (loading) {
-    return <p className="text-gray-600">Загрузка...</p>;
+    return (
+      <p className="rounded-[22px] border border-black/5 bg-white px-5 py-4 text-sm font-semibold text-brand-dark/45 shadow-premium">
+        Загрузка шаблонов...
+      </p>
+    );
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-4">
       {/* Templates */}
-      <div className="bg-white rounded-lg p-8 shadow-sm border border-gray-200">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-2xl font-bold text-gray-900">Шаблоны чек-листов</h3>
+      <div className="bg-white rounded-[28px] p-5 shadow-premium border border-black/5">
+        <div className="flex items-center justify-between gap-4 mb-5">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-brand-dark/35">
+              Конструктор
+            </p>
+            <h3 className="mt-1 text-2xl font-black text-brand-dark">Шаблоны чек-листов</h3>
+          </div>
           <button
             onClick={() => setShowCreateTemplate(!showCreateTemplate)}
-            className="btn-primary"
+            className="min-h-[48px] rounded-[18px] bg-brand-green px-5 text-sm font-black uppercase tracking-[0.16em] text-brand-dark shadow-button transition hover:bg-brand-dark hover:text-white"
           >
             {showCreateTemplate ? "Отмена" : "+ Создать шаблон"}
           </button>
         </div>
 
         {showCreateTemplate && (
-          <form onSubmit={handleCreateTemplate} className="mb-8 p-6 bg-gray-50 rounded-lg">
+          <form onSubmit={handleCreateTemplate} className="mb-6 rounded-[24px] border border-black/5 bg-[#fbfcf8] p-5">
             <input
               type="text"
               placeholder="Название шаблона"
               value={newTemplate.name}
               onChange={(e) => setNewTemplate({ ...newTemplate, name: e.target.value })}
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg mb-4 text-lg"
+              className="mb-3 w-full rounded-[18px] border border-black/8 bg-white px-4 py-3 text-base outline-none transition focus:border-brand-green"
               required
             />
             <textarea
@@ -122,11 +131,11 @@ export function ChecklistsManager() {
               onChange={(e) =>
                 setNewTemplate({ ...newTemplate, description: e.target.value })
               }
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg mb-4 text-lg resize-none"
+              className="mb-4 w-full rounded-[18px] border border-black/8 bg-white px-4 py-3 text-base outline-none transition focus:border-brand-green resize-none"
               rows={3}
             />
             <div className="mb-4">
-              <label className="block font-semibold text-gray-900 mb-3">
+              <label className="block mb-3 text-[11px] font-black uppercase tracking-[0.14em] text-brand-dark/40">
                 Задачи:
               </label>
               {newTemplate.items.map((item, idx) => (
@@ -140,22 +149,25 @@ export function ChecklistsManager() {
                     updated[idx] = e.target.value;
                     setNewTemplate({ ...newTemplate, items: updated });
                   }}
-                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg mb-2 text-lg"
+                  className="mb-2 w-full rounded-[18px] border border-black/8 bg-white px-4 py-3 text-base outline-none transition focus:border-brand-green"
                 />
               ))}
             </div>
-            <button type="submit" className="btn-primary w-full">
+            <button
+              type="submit"
+              className="min-h-[52px] w-full rounded-[18px] bg-brand-dark text-sm font-black uppercase tracking-[0.16em] text-white transition hover:bg-brand-green hover:text-brand-dark"
+            >
               Создать
             </button>
           </form>
         )}
 
-        <div className="space-y-4">
+        <div className="space-y-3">
           {templates.map((template) => (
-            <div key={template.id} className="border border-gray-200 rounded-lg p-4">
-              <h4 className="font-bold text-gray-900 text-lg">{template.name}</h4>
-              <p className="text-gray-600 mb-3">{template.description}</p>
-              <ul className="space-y-1 text-sm text-gray-700">
+            <div key={template.id} className="rounded-[22px] border border-black/6 bg-[#fbfcf8] p-4">
+              <h4 className="text-lg font-black text-brand-dark">{template.name}</h4>
+              <p className="mb-3 mt-1 text-sm text-brand-dark/45">{template.description}</p>
+              <ul className="space-y-1 text-sm text-brand-dark/75">
                 {template.items.map((item) => (
                   <li key={item.id}>• {item.title}</li>
                 ))}
@@ -166,25 +178,30 @@ export function ChecklistsManager() {
       </div>
 
       {/* Assignments */}
-      <div className="bg-white rounded-lg p-8 shadow-sm border border-gray-200">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-2xl font-bold text-gray-900">Назначить чек-листы</h3>
+      <div className="bg-white rounded-[28px] p-5 shadow-premium border border-black/5">
+        <div className="flex items-center justify-between gap-4 mb-5">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-brand-dark/35">
+              Назначения
+            </p>
+            <h3 className="mt-1 text-2xl font-black text-brand-dark">Назначить чек-листы</h3>
+          </div>
           <button
             onClick={() => setShowAssign(!showAssign)}
-            className="btn-primary"
+            className="min-h-[48px] rounded-[18px] bg-brand-green px-5 text-sm font-black uppercase tracking-[0.16em] text-brand-dark shadow-button transition hover:bg-brand-dark hover:text-white"
           >
             {showAssign ? "Отмена" : "+ Назначить"}
           </button>
         </div>
 
         {showAssign && (
-          <form onSubmit={handleAssign} className="mb-8 p-6 bg-gray-50 rounded-lg">
+          <form onSubmit={handleAssign} className="mb-6 rounded-[24px] border border-black/5 bg-[#fbfcf8] p-5">
             <select
               value={assignForm.template_id}
               onChange={(e) =>
                 setAssignForm({ ...assignForm, template_id: e.target.value })
               }
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg mb-4 text-lg"
+              className="mb-4 w-full rounded-[18px] border border-black/8 bg-white px-4 py-3 text-base outline-none transition focus:border-brand-green"
               required
             >
               <option value="">-- Выберите шаблон --</option>
@@ -206,9 +223,9 @@ export function ChecklistsManager() {
                   })
                 }
                 id="default"
-                className="w-6 h-6 accent-blue-600"
+                className="h-5 w-5 accent-brand-green"
               />
-              <label htmlFor="default" className="ml-3 font-semibold text-gray-900">
+              <label htmlFor="default" className="ml-3 text-sm font-semibold text-brand-dark">
                 Использовать как стандартный для всех объектов
               </label>
             </div>
@@ -219,7 +236,7 @@ export function ChecklistsManager() {
                 onChange={(e) =>
                   setAssignForm({ ...assignForm, object_id: e.target.value })
                 }
-                className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg mb-4 text-lg"
+                className="mb-4 w-full rounded-[18px] border border-black/8 bg-white px-4 py-3 text-base outline-none transition focus:border-brand-green"
                 required
               >
                 <option value="">-- Выберите объект --</option>
@@ -231,7 +248,10 @@ export function ChecklistsManager() {
               </select>
             )}
 
-            <button type="submit" className="btn-primary w-full">
+            <button
+              type="submit"
+              className="min-h-[52px] w-full rounded-[18px] bg-brand-dark text-sm font-black uppercase tracking-[0.16em] text-white transition hover:bg-brand-green hover:text-brand-dark"
+            >
               Назначить
             </button>
           </form>

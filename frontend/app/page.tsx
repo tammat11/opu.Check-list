@@ -1,25 +1,22 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import Link from "next/link";
+import Hero from "./components/Hero";
 
 export default function Home() {
   const router = useRouter();
 
   const handleGetStarted = () => {
-    router.push("/login");
+    router.push("/auth/login");
   };
 
   return (
     <main className="min-h-screen bg-white">
       {/* Header */}
-      <header className="border-b border-gray-100">
+      <header className="border-b border-gray-100 sticky top-0 bg-white z-50">
         <div className="max-w-6xl mx-auto px-6 py-6 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="text-4xl font-bold">
-              <span className="text-ic-green">ic</span>
-              <span className="text-gray-400">group</span>
-            </div>
+            <img src="/logo.png" alt="IC Group" className="h-12 w-auto" />
           </div>
           <nav className="hidden md:flex items-center gap-8 text-sm">
             <a href="#" className="text-gray-600 hover:text-ic-dark font-medium">
@@ -47,28 +44,8 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Hero Section */}
-      <section className="max-w-6xl mx-auto px-6 py-20 md:py-32 text-center">
-        <h1 className="text-5xl md:text-6xl font-bold mb-8 leading-tight">
-          СОЗДАТЬ
-          <br />
-          <span className="text-ic-green">ЧИСТОТУ</span>
-          <br />
-          ВО ВСЕМ
-        </h1>
-
-        <p className="text-lg text-gray-600 max-w-2xl mx-auto mb-12">
-          OPU Check-list — система управления уборкой от IC Group. Контролируйте
-          процесс, отслеживайте прогресс и обеспечивайте качество.
-        </p>
-
-        <button
-          onClick={handleGetStarted}
-          className="btn-primary text-lg px-10 py-5 inline-block"
-        >
-          ПОЛУЧИТЬ ДОСТУП
-        </button>
-      </section>
+      {/* Hero Section — ported from ICwebsite */}
+      <Hero onCtaClick={handleGetStarted} />
 
       {/* Features */}
       <section className="bg-gray-50 py-20">

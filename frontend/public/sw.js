@@ -13,10 +13,23 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("push", (event) => {
   console.log("Push event received");
 
+  let payload = {};
+  try {
+    payload = event.data?.json() || {};
+  } catch {
+    payload = {
+      body: event.data?.text() || "New notification",
+    };
+  }
+
   const options = {
-    body: event.data?.text() || "New notification",
-    icon: "/icon.png",
+    body: payload.body || "New notification",
+    icon: payload.icon || "/icon.png",
     badge: "/badge.png",
+    data: {
+      url: payload.url || "/app/work",
+      checklistId: payload.checklistId || null,
+    },
     actions: [
       {
         action: "open",
@@ -29,7 +42,7 @@ self.addEventListener("push", (event) => {
     ],
   };
 
-  const title = "OPU Checklist";
+  const title = payload.title || "OPU Checklist";
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
@@ -43,7 +56,7 @@ self.addEventListener("notificationclick", (event) => {
         if (clientList.length > 0) {
           return clientList[0].focus();
         }
-        return clients.openWindow("/");
+        return clients.openWindow(event.notification.data?.url || "/app/work");
       })
     );
   }

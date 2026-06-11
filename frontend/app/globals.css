@@ -1,12 +1,25 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+html, body {
+  overflow-x: hidden;
+  width: 100%;
+  touch-action: pan-y;
+}
 
 body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background-color: #ffffff;
-  color: #1a1a1a;
+  color: #1A1D1E;
+  font-family: 'Montserrat', 'Roboto', system-ui, -apple-system, sans-serif;
+}
+
+input, textarea {
+  font-size: 16px !important;
 }
 
 button {

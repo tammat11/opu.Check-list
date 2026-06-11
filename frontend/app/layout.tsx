@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import PushBootstrap from "./components/PushBootstrap";
 
 export const metadata: Metadata = {
   title: "OPU Check-list - IC Group",
@@ -18,6 +19,7 @@ export default function RootLayout({
         <link rel="manifest" href="/manifest.json" />
       </head>
       <body className="bg-white">
+        <PushBootstrap />
         {children}
       </body>
     </html>
