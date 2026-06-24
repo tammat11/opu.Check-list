@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   AppHero,
   CheckIcon,
@@ -8,6 +9,7 @@ import {
   PreviewNavbar,
   StatCard,
 } from "../components/AppChrome";
+import { API_BASE, canAccessWork, fetchCurrentUser, logout as logoutUser } from "../lib/auth";
 
 interface ChecklistItem {
   id: string;
@@ -16,35 +18,134 @@ interface ChecklistItem {
 }
 
 export default function ChecklistPage() {
-  const [items, setItems] = useState<ChecklistItem[]>([
-    { id: "1", title: "Пропылесосить полы", completed: false },
-    { id: "2", title: "Протереть поверхности", completed: false },
-    { id: "3", title: "Проверить кухонную зону", completed: false },
-    { id: "4", title: "Подготовить фотоотчет", completed: false },
-  ]);
+  const router = useRouter();
+  const [authReady, setAuthReady] = useState(false);
+  const [items, setItems] = useState<ChecklistItem[]>([]);
   const [newItem, setNewItem] = useState("");
 
-  const toggleItem = (id: string) => {
+  useEffect(() => {
+    fetchCurrentUser()
+      .then((currentUser) => {
+        if (!currentUser) {
+          router.push("/auth/login");
+          return;
+        }
+
+        if (!canAccessWork(currentUser.role)) {
+          router.push("/app/dashboard");
+          return;
+        }
+
+        setAuthReady(true);
+        router.push("/app/work");
+      });
+  }, [router]);
+
+  useEffect(() => {
+    if (!authReady) return;
+
+    const token = localStorage.getItem("token");
+    if (!token) {
+      router.push("/auth/login");
+      return;
+    }
+
+    fetch(`${API_BASE}/checklists/personal`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => {
+        if (res.status === 401 || res.status === 403) {
+          return logoutUser().then(() => {
+            router.push("/auth/login");
+            return null;
+          });
+        }
+        return res.json();
+      })
+      .then((data) => {
+        if (!data) return;
+        setItems(
+          (data.items || []).map((item: { id: number; title: string; completed: boolean }) => ({
+            id: String(item.id),
+            title: item.title,
+            completed: item.completed,
+          }))
+        );
+      })
+      .catch(() => {});
+  }, [authReady, router]);
+
+  const toggleItem = async (id: string) => {
+    const token = localStorage.getItem("token");
+    const target = items.find((item) => item.id === id);
+    if (!token || !target) return;
+
+    const nextCompleted = !target.completed;
     setItems((prev) =>
       prev.map((item) =>
-        item.id === id ? { ...item, completed: !item.completed } : item
+        item.id === id ? { ...item, completed: nextCompleted } : item
       )
     );
+
+    await fetch(`${API_BASE}/checklists/personal/${id}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ completed: nextCompleted }),
+    });
   };
 
-  const addItem = (e: React.FormEvent) => {
+  const addItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newItem.trim()) return;
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    const res = await fetch(`${API_BASE}/checklists/personal`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ title: newItem.trim() }),
+    });
+    const created = await res.json();
 
     setItems((prev) => [
       ...prev,
-      { id: Date.now().toString(), title: newItem, completed: false },
+      { id: String(created.id), title: created.title, completed: created.completed },
     ]);
     setNewItem("");
   };
 
+  const clearCompleted = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    const completedIds = items.filter((item) => item.completed).map((item) => item.id);
+    await Promise.all(
+      completedIds.map((id) =>
+        fetch(`${API_BASE}/checklists/personal/${id}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        })
+      )
+    );
+    setItems((prev) => prev.filter((item) => !item.completed));
+  };
+
   const completedCount = items.filter((item) => item.completed).length;
   const progress = Math.round((completedCount / items.length) * 100) || 0;
+
+  if (!authReady) {
+    return (
+      <main className="min-h-screen bg-[#f5f7f2] flex items-center justify-center">
+        <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-dark/35">Проверка доступа...</p>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-[#f5f7f2]">
@@ -134,7 +235,7 @@ export default function ChecklistPage() {
 
         {completedCount > 0 ? (
           <button
-            onClick={() => setItems((prev) => prev.filter((item) => !item.completed))}
+            onClick={clearCompleted}
             className="mt-4 min-h-[52px] w-full rounded-[22px] border border-black/8 bg-white text-sm font-black uppercase tracking-[0.16em] text-brand-dark shadow-premium transition hover:border-brand-dark"
           >
             Очистить выполненные

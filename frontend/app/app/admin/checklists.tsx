@@ -5,6 +5,11 @@ import axios from "axios";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api";
 
+const authConfig = () => {
+  const token = localStorage.getItem("token");
+  return token ? { headers: { Authorization: `Bearer ${token}` } } : {};
+};
+
 interface Template {
   id: number;
   name: string;
@@ -43,8 +48,8 @@ export function ChecklistsManager() {
   const loadData = async () => {
     try {
       const [templatesRes, objectsRes] = await Promise.all([
-        axios.get(`${API_BASE}/checklists/templates`),
-        axios.get(`${API_BASE}/objects`),
+        axios.get(`${API_BASE}/checklists/templates`, authConfig()),
+        axios.get(`${API_BASE}/objects`, authConfig()),
       ]);
       setTemplates(templatesRes.data.templates);
       setObjects(objectsRes.data.objects);
@@ -62,7 +67,7 @@ export function ChecklistsManager() {
         ...newTemplate,
         items: newTemplate.items.filter((i) => i.trim()),
         created_by: 1, // Replace with actual user ID
-      });
+      }, authConfig());
       setTemplates([...templates, res.data.template]);
       setNewTemplate({ name: "", description: "", items: ["", "", ""] });
       setShowCreateTemplate(false);
@@ -79,7 +84,7 @@ export function ChecklistsManager() {
         template_id: Number(assignForm.template_id),
         object_id: assignForm.is_default ? null : Number(assignForm.object_id),
         assigned_by: 1, // Replace with actual user ID
-      });
+      }, authConfig());
       setAssignForm({ template_id: "", object_id: "", is_default: false });
       setShowAssign(false);
       alert("✓ Чек-лист назначен!");

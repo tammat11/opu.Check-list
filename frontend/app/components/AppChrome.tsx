@@ -41,10 +41,51 @@ export const CheckIcon = ({ cls = "w-4 h-4" }: IconProps) => (
 );
 
 type PreviewNavbarProps = {
-  active: "dashboard" | "admin" | "work" | "checklist";
+  active: "dashboard" | "admin" | "work" | "checklist" | "approvals";
 };
 
 export function PreviewNavbar({ active }: PreviewNavbarProps) {
+  const role = typeof window !== "undefined" ? localStorage.getItem("opu-user-role") : null;
+  const userName = typeof window !== "undefined" ? localStorage.getItem("opu-user-name") : null;
+  const isCleaner = role === "cleaner";
+  const canSeeAdminLink = role === "admin" || role === "partner";
+  const actionHref = isCleaner ? "/app/work" : "/app/approvals";
+  const actionActive = isCleaner
+    ? active === "work" || active === "checklist"
+    : active === "approvals";
+  const actionLabel = isCleaner ? "Уборка" : "Заявки";
+
+  if (isCleaner) {
+    return (
+      <div className="sticky top-0 z-50 px-4 pt-3 pb-2">
+        <div className="max-w-2xl mx-auto rounded-[26px] bg-brand-dark/95 backdrop-blur-xl shadow-[0_8px_32px_rgba(26,29,30,0.28)] overflow-hidden">
+          <div className="flex items-center justify-center gap-2 px-4 py-1.5 bg-white/5 border-b border-white/6">
+            <span className="text-[9px] font-black uppercase tracking-[0.24em] text-white/45">
+              Профиль клинера
+            </span>
+            <span className="px-2 py-0.5 rounded-full bg-brand-green/25 text-brand-green text-[8px] font-black uppercase tracking-[0.15em]">
+              Online
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+            <div className="flex items-center gap-2 shrink-0">
+              <img src="/logo.png" alt="IC Group" className="h-6 w-auto brightness-0 invert opacity-80" />
+            </div>
+
+            <button
+              type="button"
+              className="flex items-center gap-2 px-3.5 py-1.5 rounded-[16px] bg-brand-green text-brand-dark text-[10px] font-black uppercase tracking-[0.08em] shadow-[0_2px_12px_rgba(143,198,64,0.35)]"
+            >
+              <UsersIcon cls="w-4 h-4" />
+              <span className="max-w-[130px] truncate">{userName || "Профиль"}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="sticky top-0 z-50 px-4 pt-3 pb-2">
       <div className="max-w-2xl mx-auto rounded-[26px] bg-brand-dark/95 backdrop-blur-xl shadow-[0_8px_32px_rgba(26,29,30,0.28)] overflow-hidden">
@@ -73,25 +114,27 @@ export function PreviewNavbar({ active }: PreviewNavbarProps) {
             >
               <GridIcon /> <span className="hidden sm:inline">Дашборд</span>
             </Link>
+            {canSeeAdminLink ? (
+              <Link
+                href="/app/admin"
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[14px] transition-all text-[10px] font-black uppercase tracking-[0.08em] ${
+                  active === "admin"
+                    ? "bg-white/10 text-white"
+                    : "text-white/45 hover:text-white hover:bg-white/8"
+                }`}
+              >
+                <UsersIcon /> <span className="hidden sm:inline">Админка</span>
+              </Link>
+            ) : null}
             <Link
-              href="/app/admin"
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[14px] transition-all text-[10px] font-black uppercase tracking-[0.08em] ${
-                active === "admin"
-                  ? "bg-white/10 text-white"
-                  : "text-white/45 hover:text-white hover:bg-white/8"
-              }`}
-            >
-              <UsersIcon /> <span className="hidden sm:inline">Админка</span>
-            </Link>
-            <Link
-              href={active === "checklist" ? "/checklist" : "/app/work"}
+              href={actionHref}
               className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-[16px] transition-all text-[10px] font-black uppercase tracking-[0.08em] ${
-                active === "work" || active === "checklist"
+                actionActive
                   ? "bg-brand-green text-brand-dark shadow-[0_2px_12px_rgba(143,198,64,0.35)]"
                   : "text-white/45 hover:text-white hover:bg-white/8"
               }`}
             >
-              <ClipboardIcon /> <span className="hidden sm:inline">Уборка</span>
+              <ClipboardIcon /> <span className="hidden sm:inline">{actionLabel}</span>
             </Link>
           </div>
         </div>

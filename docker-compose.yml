@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: opu-postgres
+    environment:
+      POSTGRES_DB: opu_checklist
+      POSTGRES_USER: opu_user
+      POSTGRES_PASSWORD: opu_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opu_user -d opu_checklist"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: opu-backend
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://opu_user:opu_password@postgres:5432/opu_checklist
+      UPLOADS_DIR: /app/uploads
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head &&
+      uvicorn app.main:app --host 0.0.0.0 --port 3001"
+    volumes:
+      - ./backend/uploads:/app/uploads
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { PreviewNavbar } from "../../components/AppChrome";
+import { API_BASE, canAccessAdminPanel, fetchCurrentUser, logout as logoutUser } from "../../lib/auth";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const ZONE_OPTIONS = ["Санузлы", "Зал / Офис", "Коридоры", "Кухня", "Другое"];
@@ -269,13 +271,25 @@ interface Address {
   name: string;
   district: string;
   checklistId: number;
+  assignmentId?: number;
   workers: number;
   lat?: number;
   lng?: number;
 }
 
+interface TeamUser {
+  id: number;
+  name: string;
+  phone: string;
+  role: string;
+  status: string;
+  parent_id?: number | null;
+  children_count: number;
+}
+
+let taskSeed = 1;
 const mkTask = (title: string, zone: string, time: string, at = "", icon = "sparkles"): Task =>
-  ({ id: Date.now() + Math.random(), title, zone, time, at, icon });
+  ({ id: taskSeed++, title, zone, time, at, icon });
 
 const initialChecklists: Checklist[] = [
   {
@@ -323,14 +337,48 @@ const initialAddresses: Address[] = [
 ];
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
+type ApiTemplate = {
+  id: number;
+  name: string;
+  items?: {
+    id: number;
+    title: string;
+    zone?: string | null;
+    icon?: string | null;
+    duration_minutes?: number | null;
+    order_index?: number;
+  }[];
+};
+
+const apiTemplateToChecklist = (template: ApiTemplate): Checklist => ({
+  id: template.id,
+  name: template.name,
+  tasks: [...(template.items ?? [])]
+    .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
+    .map((item) => ({
+      id: item.id,
+      title: item.title,
+      zone: item.zone || "Другое",
+      time: `${item.duration_minutes ?? 5} мин`,
+      at: "",
+      icon: item.icon || "sparkles",
+    })),
+});
+
+const checklistToApiItems = (tasks: Task[]) =>
+  tasks
+    .filter((task) => task.title.trim())
+    .map((task) => ({
+      title: task.title.trim(),
+      zone: task.zone,
+      icon: task.icon,
+      duration_minutes: parseInt(task.time, 10) || 5,
+      requires_photo: false,
+    }));
+
 const PlusIcon = () => (
   <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-  </svg>
-);
-const BuildingIcon = () => (
-  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21" />
   </svg>
 );
 const TrashIcon = ({ cls = "w-4 h-4" }: { cls?: string }) => (
@@ -354,26 +402,153 @@ const ClockIcon = () => (
   </svg>
 );
 
-type Tab = "addresses" | "checklists";
+type Tab = "addresses" | "checklists" | "users";
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function AdminPage() {
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>("addresses");
+  const [authReady, setAuthReady] = useState(false);
+  const [formError, setFormError] = useState("");
 
   // Addresses
   const [addresses, setAddresses] = useState<Address[]>(initialAddresses);
-  const [adding, setAdding] = useState(false);
+  const [addingChecklistId, setAddingChecklistId] = useState<number | null>(null);
   const [newName, setNewName] = useState("");
   const [newDistrict, setNewDistrict] = useState("");
-  const [newChecklistId, setNewChecklistId] = useState<number | "new">(1);
-  const [newClName, setNewClName] = useState("");
 
   // Checklists
   const [checklists, setChecklists] = useState<Checklist[]>(initialChecklists);
+  const [creatingChecklist, setCreatingChecklist] = useState(false);
+  const [newChecklistName, setNewChecklistName] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editTasks, setEditTasks] = useState<Task[]>([]);
   const [editName, setEditName] = useState("");
   const [iconPickerFor, setIconPickerFor] = useState<number | null>(null);
+  const [users, setUsers] = useState<TeamUser[]>([]);
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [newUserName, setNewUserName] = useState("");
+  const [newUserPhone, setNewUserPhone] = useState("+7 ");
+  const [newUserIin, setNewUserIin] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
+  const [newUserRole, setNewUserRole] = useState("cleaner");
+
+  const authHeaders = () => {
+    const token = localStorage.getItem("token");
+    return {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+  };
+
+  useEffect(() => {
+    fetchCurrentUser()
+      .then((currentUser) => {
+        if (!currentUser) {
+          router.push("/auth/login");
+          return;
+        }
+
+        if (!canAccessAdminPanel(currentUser.role)) {
+          router.push("/app/dashboard");
+          return;
+        }
+
+        setAuthReady(true);
+      });
+  }, [router]);
+
+  useEffect(() => {
+    if (!authReady) return;
+
+    const loadAdminData = async () => {
+      try {
+        const [objectsRes, assignmentsRes, templatesRes, usersRes] = await Promise.all([
+          fetch(`${API_BASE}/objects`, { headers: authHeaders() }),
+          fetch(`${API_BASE}/checklists/assignments`, { headers: authHeaders() }),
+          fetch(`${API_BASE}/checklists/templates`, { headers: authHeaders() }),
+          fetch(`${API_BASE}/users`, { headers: authHeaders() }),
+        ]);
+
+        if (
+          objectsRes.status === 401 ||
+          objectsRes.status === 403 ||
+          assignmentsRes.status === 401 ||
+          assignmentsRes.status === 403 ||
+          templatesRes.status === 401 ||
+          templatesRes.status === 403 ||
+          usersRes.status === 401 ||
+          usersRes.status === 403
+        ) {
+          await logoutUser();
+          setFormError("Недостаточно прав. Войдите заново на этом адресе: 127.0.0.1:3000.");
+          router.push("/auth/login");
+          return;
+        }
+
+        const objectsData = await objectsRes.json();
+        const assignmentsData = await assignmentsRes.json();
+        const templatesData = await templatesRes.json();
+        const usersData = await usersRes.json();
+        const assignmentMap = new Map<number, { templateId: number; assignmentId: number }>();
+
+        if (Array.isArray(templatesData.templates) && templatesData.templates.length > 0) {
+          const nextChecklists = templatesData.templates.map(apiTemplateToChecklist);
+          setChecklists(nextChecklists);
+        }
+
+        if (Array.isArray(assignmentsData.assignments)) {
+          for (const assignment of assignmentsData.assignments) {
+            if (
+              typeof assignment.object_id === "number" &&
+              typeof assignment.template_id === "number" &&
+              !assignmentMap.has(assignment.object_id)
+            ) {
+              assignmentMap.set(assignment.object_id, {
+                templateId: assignment.template_id,
+                assignmentId: assignment.id,
+              });
+            }
+          }
+        }
+
+        if (Array.isArray(objectsData.objects) && objectsData.objects.length > 0) {
+          setAddresses(
+            objectsData.objects.map(
+              (object: {
+                id: number;
+                name: string;
+                address?: string | null;
+                district?: string | null;
+                workers_count?: number;
+                latitude?: number | null;
+                longitude?: number | null;
+              }) => {
+                const assignment = assignmentMap.get(object.id);
+                return assignment
+                  ? {
+                      id: object.id,
+                      name: object.address || object.name,
+                      district: object.district || "",
+                      checklistId: assignment.templateId,
+                      assignmentId: assignment.assignmentId,
+                      workers: object.workers_count ?? 1,
+                      lat: object.latitude ?? undefined,
+                      lng: object.longitude ?? undefined,
+                    }
+                  : null;
+              }
+            ).filter(Boolean) as Address[]
+          );
+        }
+        if (Array.isArray(usersData.users)) {
+          setUsers(usersData.users);
+        }
+      } catch {}
+    };
+
+    loadAdminData();
+  }, [authReady, router]);
 
   const startEdit = (cl: Checklist) => {
     setEditingId(cl.id);
@@ -382,15 +557,89 @@ export default function AdminPage() {
     setIconPickerFor(null);
   };
 
-  const saveEdit = () => {
+  const saveEdit = async () => {
     if (!editingId) return;
-    setChecklists(prev => prev.map(cl =>
-      cl.id === editingId
-        ? { ...cl, name: editName, tasks: editTasks.filter(t => t.title.trim()) }
-        : cl
-    ));
-    setEditingId(null);
-    setIconPickerFor(null);
+    try {
+      const res = await fetch(`${API_BASE}/checklists/templates/${editingId}`, {
+        method: "PUT",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          name: editName,
+          items: checklistToApiItems(editTasks),
+        }),
+      });
+
+      if (res.ok) {
+        const template = await res.json();
+        setChecklists(prev => prev.map(cl =>
+          cl.id === editingId ? apiTemplateToChecklist(template) : cl
+        ));
+        setEditingId(null);
+        setIconPickerFor(null);
+      } else {
+        setFormError("Не удалось сохранить чек-лист.");
+      }
+    } catch {
+      setFormError("Не удалось сохранить чек-лист.");
+    }
+  };
+
+  const createChecklist = async () => {
+    setFormError("");
+    if (!newChecklistName.trim()) {
+      setFormError("Введите название чек-листа.");
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/checklists/templates`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          name: newChecklistName.trim(),
+          items: [],
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setFormError(data.detail || "Не удалось создать чек-лист.");
+        return;
+      }
+
+      const createdChecklist = apiTemplateToChecklist(data.template);
+      setChecklists((prev) => [...prev, createdChecklist]);
+      setCreatingChecklist(false);
+      setNewChecklistName("");
+      startEdit(createdChecklist);
+    } catch {
+      setFormError("Не удалось создать чек-лист.");
+    }
+  };
+
+  const deleteChecklist = async (checklistId: number) => {
+    setFormError("");
+    try {
+      const res = await fetch(`${API_BASE}/checklists/templates/${checklistId}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setFormError(data.detail || "Не удалось удалить чек-лист.");
+        return;
+      }
+
+      setChecklists((prev) => prev.filter((item) => item.id !== checklistId));
+      setAddresses((prev) => prev.filter((item) => item.checklistId !== checklistId));
+      setEditingId(null);
+      setIconPickerFor(null);
+      setEditTasks([]);
+      setEditName("");
+    } catch {
+      setFormError("Не удалось удалить чек-лист.");
+    }
   };
 
   const updateTask = (idx: number, field: keyof Task, val: string) => {
@@ -403,6 +652,12 @@ export default function AdminPage() {
     cl, color: CL_COLORS[idx] ?? CL_COLORS[0],
     addresses: addresses.filter(a => a.checklistId === cl.id),
   }));
+  const cleaners = users.filter((user) => user.role === "cleaner" && user.status === "active");
+  const managers = users.filter((user) => user.role !== "cleaner" && user.status === "active");
+  const roleLabel = (role: string) =>
+    role === "admin" ? "Админ" :
+    role === "partner" ? "Партнер" :
+    role === "curator" ? "Куратор" : "Клинер";
 
   const totalTime = (tasks: Task[]) => {
     const mins = tasks.reduce((acc, t) => {
@@ -411,6 +666,143 @@ export default function AdminPage() {
     }, 0);
     return mins ? `${mins} мин` : "—";
   };
+
+  const createUser = async () => {
+    setFormError("");
+    if (!newUserName.trim() || !newUserPhone.trim() || newUserIin.length !== 12) {
+      setFormError("Заполните имя, телефон и Н из 12 цифр.");
+      return;
+    }
+
+    const res = await fetch(`${API_BASE}/users`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        name: newUserName.trim(),
+        phone: newUserPhone.trim(),
+        iin: newUserIin.trim(),
+        role: newUserRole,
+        password: newUserPassword.trim() || "welcome123",
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setFormError(data.detail || "Не удалось создать сотрудника.");
+      return;
+    }
+
+    setUsers((prev) => [...prev, { ...data, children_count: data.children_count ?? 0 }]);
+    setNewUserName("");
+    setNewUserPhone("+7 ");
+    setNewUserIin("");
+    setNewUserPassword("");
+    setNewUserRole("cleaner");
+    setCreatingUser(false);
+  };
+
+  const deactivateUser = async (userId: number) => {
+    setFormError("");
+    const res = await fetch(`${API_BASE}/users/${userId}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setFormError(data.detail || "Не удалось отключить сотрудника.");
+      return;
+    }
+    setUsers((prev) => prev.map((user) => user.id === userId ? { ...user, status: "inactive" } : user));
+  };
+
+  const resetAddressForm = () => {
+    setAddingChecklistId(null);
+    setNewName("");
+    setNewDistrict("");
+  };
+
+  const removeAddressFromChecklist = async (address: Address) => {
+    setFormError("");
+    if (!address.assignmentId) {
+      setFormError("Не найдена привязка адреса к чек-листу.");
+      return;
+    }
+
+    const res = await fetch(`${API_BASE}/checklists/assignments/${address.assignmentId}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setFormError(data.detail || "Не удалось удалить адрес из чек-листа.");
+      return;
+    }
+
+    setAddresses((prev) => prev.filter((item) => item.id !== address.id));
+  };
+
+  const createAddressForChecklist = async (checklistId: number) => {
+    setFormError("");
+    if (!newName.trim()) {
+      return;
+    }
+
+    try {
+      const objectRes = await fetch(`${API_BASE}/objects`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          name: newName.trim(),
+          address: newName.trim(),
+          district: newDistrict.trim() || null,
+          workers_count: 1,
+          status: "active",
+        }),
+      });
+      const createdObject = await objectRes.json();
+
+      if (!objectRes.ok) {
+        throw new Error(createdObject.detail || "Failed to create object");
+      }
+
+      const objectId = createdObject.id;
+      const assignRes = await fetch(`${API_BASE}/checklists/assign`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          template_id: checklistId,
+          object_id: objectId,
+          is_default: false,
+        }),
+      });
+      const assignData = await assignRes.json().catch(() => ({}));
+      if (!assignRes.ok) {
+        throw new Error(assignData.detail || "Failed to assign checklist");
+      }
+
+      setAddresses((prev) => [
+        ...prev,
+        {
+          id: typeof objectId === "number" ? objectId : Date.now(),
+          name: newName.trim(),
+          district: newDistrict.trim(),
+          checklistId,
+          assignmentId: assignData.assignment?.id,
+          workers: 1,
+        },
+      ]);
+      resetAddressForm();
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Не удалось создать адрес.");
+    }
+  };
+
+  if (!authReady) {
+    return (
+      <main className="min-h-screen bg-[#f5f7f2] flex items-center justify-center">
+        <p className="text-sm font-black uppercase tracking-[0.18em] text-brand-dark/35">Проверка доступа...</p>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-[#f5f7f2]">
@@ -434,17 +826,17 @@ export default function AdminPage() {
 
         {/* Tabs */}
         <div className="flex gap-2 mb-4 bg-white rounded-[18px] p-1.5 border border-black/5">
-          {(["addresses", "checklists"] as Tab[]).map(t => (
+          {(["addresses", "checklists", "users"] as Tab[]).map(t => (
             <button key={t} onClick={() => setTab(t)}
               className={`flex-1 py-2.5 rounded-[14px] text-xs font-black uppercase tracking-wider transition-all ${
                 tab === t ? "bg-brand-dark text-white shadow-sm" : "text-brand-dark/50 hover:text-brand-dark"
               }`}>
-              {t === "addresses" ? "Адреса" : "Чек-листы"}
+              {t === "addresses" ? "Адреса" : t === "checklists" ? "Чек-листы" : "Сотрудники"}
             </button>
           ))}
         </div>
 
-        {/* ── ADDRESSES TAB ── */}
+        {/* Addresses Tab */}
         {tab === "addresses" && (
           <div className="space-y-3">
             {grouped.map(({ cl, color, addresses: addrs }) => (
@@ -455,104 +847,148 @@ export default function AdminPage() {
                     <p className="font-black text-sm text-brand-dark uppercase tracking-wider">{cl.name}</p>
                     <p className="text-[11px] text-brand-dark/40 font-semibold mt-0.5">{cl.tasks.length} задач · {totalTime(cl.tasks)}</p>
                   </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {addrs.length > 0 && (
-                      <span className="flex items-center gap-1 px-2.5 py-1.5 rounded-[12px] bg-brand-green/12 text-xs font-black text-brand-green">
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-                        </svg>
-                        {addrs.reduce((s, a) => s + (a.workers ?? 1), 0)} чел.
-                      </span>
-                    )}
-                    <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-[12px] bg-brand-dark/6 text-xs font-black text-brand-dark/60">
-                      <BuildingIcon />
-                      {addrs.length === 0
-                        ? "Нет адресов"
-                        : addrs.length === 1
-                          ? addrs[0].name
-                          : `Остальные адреса (${addrs.length})`}
-                    </span>
-                  </div>
+                  <span className="rounded-[12px] bg-brand-dark/6 px-3 py-1.5 text-xs font-black text-brand-dark/60">
+                    {addrs.length} {addrs.length === 1 ? "адрес" : addrs.length < 5 ? "адреса" : "адресов"}
+                  </span>
+                </div>
+
+                <div className="border-t border-black/5 bg-[#fbfcf8] px-4 py-3 space-y-2">
+                  {addrs.length > 0 ? (
+                    addrs.map((address) => (
+                      <div key={address.id} className="rounded-[16px] bg-white border border-black/5 px-3 py-3">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-black text-brand-dark truncate">{address.name}</p>
+                            <p className="text-[10px] font-semibold text-brand-dark/35">
+                              {address.district || "Район не указан"}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => removeAddressFromChecklist(address)}
+                            className="min-h-[38px] rounded-[12px] border border-red-200 bg-red-50 px-4 text-[10px] font-black uppercase tracking-[0.12em] text-red-500 transition hover:bg-red-500 hover:text-white"
+                          >
+                            Удалить
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-[16px] border border-dashed border-black/10 bg-white/70 px-4 py-5 text-center text-xs font-semibold text-brand-dark/35">
+                      Для этого чек-листа пока не привязан ни один адрес.
+                    </div>
+                  )}
+
+                  {addingChecklistId === cl.id ? (
+                    <div className="rounded-[18px] bg-white border border-black/5 px-4 py-4 space-y-3">
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-dark/40">
+                        Новый адрес для {cl.name}
+                      </p>
+                      <input
+                        autoFocus
+                        value={newName}
+                        onChange={(e) => setNewName(e.target.value)}
+                        placeholder="Адрес объекта"
+                        className="w-full px-4 py-3 rounded-[16px] border-2 border-black/8 focus:border-brand-green outline-none text-sm font-semibold bg-[#fafaf8] transition-colors"
+                      />
+                      <input
+                        value={newDistrict}
+                        onChange={(e) => setNewDistrict(e.target.value)}
+                        placeholder="Район (необязательно)"
+                        className="w-full px-4 py-3 rounded-[16px] border-2 border-black/8 focus:border-brand-green outline-none text-sm font-semibold bg-[#fafaf8] transition-colors"
+                      />
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          disabled={!newName.trim()}
+                          onClick={() => createAddressForChecklist(cl.id)}
+                          className="flex-1 py-3 rounded-[16px] bg-brand-green text-brand-dark text-xs font-black uppercase disabled:opacity-40 hover:bg-brand-dark hover:text-white transition-all"
+                        >
+                          Добавить
+                        </button>
+                        <button
+                          onClick={resetAddressForm}
+                          className="px-5 py-3 rounded-[16px] bg-black/6 text-brand-dark/60 text-xs font-black uppercase"
+                        >
+                          Отмена
+                        </button>
+                      </div>
+                      {formError && (
+                        <p className="text-xs font-semibold text-red-500">{formError}</p>
+                      )}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setFormError("");
+                        setAddingChecklistId(cl.id);
+                        setNewName("");
+                        setNewDistrict("");
+                      }}
+                      className="w-full flex items-center gap-3 rounded-[16px] bg-white border border-dashed border-black/10 px-4 py-4 text-brand-dark/50 hover:text-brand-dark transition-colors"
+                    >
+                      <div className="w-8 h-8 rounded-[12px] border-2 border-dashed border-brand-dark/20 flex items-center justify-center"><PlusIcon /></div>
+                      <span className="text-sm font-black uppercase tracking-wider">Добавить адрес</span>
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
-
-            {/* Add address */}
-            <div className="rounded-[24px] bg-white border border-black/5 overflow-hidden shadow-[0_1px_8px_rgba(0,0,0,0.06)]">
-              {!adding ? (
-                <button onClick={() => setAdding(true)} className="w-full flex items-center gap-3 px-4 py-4 text-brand-dark/50 hover:text-brand-dark transition-colors">
-                  <div className="w-8 h-8 rounded-[12px] border-2 border-dashed border-brand-dark/20 flex items-center justify-center"><PlusIcon /></div>
-                  <span className="text-sm font-black uppercase tracking-wider">Добавить адрес</span>
-                </button>
-              ) : (
-                <div className="p-4 space-y-3">
-                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-dark/40">Новый адрес</p>
-                  <input autoFocus value={newName} onChange={e => setNewName(e.target.value)} placeholder="Адрес объекта"
-                    className="w-full px-4 py-3 rounded-[16px] border-2 border-black/8 focus:border-brand-green outline-none text-sm font-semibold bg-[#fafaf8] transition-colors" />
-                  <input value={newDistrict} onChange={e => setNewDistrict(e.target.value)} placeholder="Район (необязательно)"
-                    className="w-full px-4 py-3 rounded-[16px] border-2 border-black/8 focus:border-brand-green outline-none text-sm font-semibold bg-[#fafaf8] transition-colors" />
-
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-wider text-brand-dark/40 mb-2">Чек-лист</p>
-                    <div className="flex flex-wrap gap-2">
-                      {checklists.map((cl, idx) => (
-                        <button key={cl.id} onClick={() => setNewChecklistId(cl.id)}
-                          className={`px-3 py-2 rounded-[14px] text-xs font-black uppercase transition-all ${
-                            newChecklistId === cl.id ? `${CL_COLORS[idx]?.badge ?? "bg-gray-500"} text-white` : "bg-black/5 text-brand-dark/50 hover:bg-black/10"
-                          }`}>
-                          {cl.name}
-                        </button>
-                      ))}
-                      <button onClick={() => setNewChecklistId("new")}
-                        className={`px-3 py-2 rounded-[14px] text-xs font-black uppercase transition-all flex items-center gap-1 ${
-                          newChecklistId === "new" ? "bg-brand-green text-brand-dark" : "bg-black/5 text-brand-dark/50 hover:bg-black/10"
-                        }`}>
-                        <PlusIcon /> Новый чек-лист
-                      </button>
-                    </div>
-                  </div>
-
-                  {newChecklistId === "new" && (
-                    <input value={newClName} onChange={e => setNewClName(e.target.value)}
-                      placeholder="Название нового чек-листа"
-                      className="w-full px-4 py-3 rounded-[16px] border-2 border-brand-green outline-none text-sm font-semibold bg-[#fafaf8] transition-colors" />
-                  )}
-
-                  <div className="flex gap-2 pt-1">
-                    <button
-                      disabled={!newName.trim() || (newChecklistId === "new" && !newClName.trim())}
-                      onClick={() => {
-                        if (!newName.trim()) return;
-                        let clId: number;
-                        if (newChecklistId === "new") {
-                          if (!newClName.trim()) return;
-                          const nextId = Math.max(0, ...checklists.map(c => c.id)) + 1;
-                          setChecklists(p => [...p, { id: nextId, name: newClName.trim(), tasks: [] }]);
-                          clId = nextId;
-                          setNewClName("");
-                        } else {
-                          clId = newChecklistId as number;
-                        }
-                        setAddresses(p => [...p, { id: Date.now(), name: newName.trim(), district: newDistrict.trim(), checklistId: clId }]);
-                        setNewName(""); setNewDistrict(""); setNewChecklistId(1); setAdding(false);
-                      }}
-                      className="flex-1 py-3 rounded-[16px] bg-brand-green text-brand-dark text-xs font-black uppercase disabled:opacity-40 hover:bg-brand-dark hover:text-white transition-all">
-                      Добавить
-                    </button>
-                    <button onClick={() => { setAdding(false); setNewName(""); setNewDistrict(""); setNewClName(""); setNewChecklistId(1); }}
-                      className="px-5 py-3 rounded-[16px] bg-black/6 text-brand-dark/60 text-xs font-black uppercase">
-                      Отмена
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
           </div>
         )}
 
         {/* ── CHECKLISTS TAB ── */}
         {tab === "checklists" && (
           <div className="space-y-4">
+            <div className="rounded-[24px] bg-white border border-black/5 overflow-hidden shadow-[0_1px_8px_rgba(0,0,0,0.06)]">
+              {!creatingChecklist ? (
+                <button
+                  onClick={() => {
+                    setFormError("");
+                    setCreatingChecklist(true);
+                    setNewChecklistName("");
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-4 text-brand-dark/50 hover:text-brand-dark transition-colors"
+                >
+                  <div className="w-8 h-8 rounded-[12px] border-2 border-dashed border-brand-dark/20 flex items-center justify-center"><PlusIcon /></div>
+                  <span className="text-sm font-black uppercase tracking-wider">Добавить чек-лист</span>
+                </button>
+              ) : (
+                <div className="p-4 space-y-3">
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-dark/40">Новый чек-лист</p>
+                  <input
+                    autoFocus
+                    value={newChecklistName}
+                    onChange={(e) => setNewChecklistName(e.target.value)}
+                    placeholder="Название чек-листа"
+                    className="w-full px-4 py-3 rounded-[16px] border-2 border-black/8 focus:border-brand-green outline-none text-sm font-semibold bg-[#fafaf8] transition-colors"
+                  />
+
+                  {formError && (
+                    <p className="text-xs font-semibold text-red-500">{formError}</p>
+                  )}
+
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      disabled={!newChecklistName.trim()}
+                      onClick={createChecklist}
+                      className="flex-1 py-3 rounded-[16px] bg-brand-green text-brand-dark text-xs font-black uppercase disabled:opacity-40 hover:bg-brand-dark hover:text-white transition-all"
+                    >
+                      Создать
+                    </button>
+                    <button
+                      onClick={() => {
+                        setCreatingChecklist(false);
+                        setNewChecklistName("");
+                        setFormError("");
+                      }}
+                      className="px-5 py-3 rounded-[16px] bg-black/6 text-brand-dark/60 text-xs font-black uppercase"
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {checklists.map((cl, idx) => {
               const color = CL_COLORS[idx] ?? CL_COLORS[0];
               const isEditing = editingId === cl.id;
@@ -578,6 +1014,12 @@ export default function AdminPage() {
                       <div className="flex gap-1">
                         <button onClick={saveEdit} className="flex items-center gap-1 px-3 py-1.5 rounded-[10px] bg-brand-green text-brand-dark text-[10px] font-black uppercase">
                           <CheckIcon /> Сохранить
+                        </button>
+                        <button
+                          onClick={() => deleteChecklist(cl.id)}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-[10px] bg-red-50 text-red-500 text-[10px] font-black uppercase border border-red-200 hover:bg-red-500 hover:text-white transition-colors"
+                        >
+                          <TrashIcon cls="w-3 h-3" /> Удалить
                         </button>
                         <button onClick={() => { setEditingId(null); setIconPickerFor(null); }} className="px-2.5 py-1.5 rounded-[10px] bg-black/6 text-brand-dark/50 text-[10px] font-black">✕</button>
                       </div>
@@ -650,7 +1092,7 @@ export default function AdminPage() {
                                           {/* Icon picker grid */}
                                           {iconPickerFor === t.id && (
                                             <div className="mt-1 p-2 rounded-[10px] bg-[#f5f7f2] border border-black/8">
-                                              <p className="text-[8px] font-black uppercase tracking-widest text-brand-dark/30 mb-1.5 px-0.5">Иконка</p>
+                                              <p className="text-[8px] font-black uppercase tracking-widest text-brand-dark/30 mb-1.5 px-0.5">конка</p>
                                               <div className="flex flex-wrap gap-1">
                                                 {TASK_ICONS.map(icon => (
                                                   <button
@@ -707,7 +1149,7 @@ export default function AdminPage() {
                               <span className="text-[9px] text-brand-dark/30 font-black">{tasks.length} задач</span>
                             </div>
                             <div className="space-y-1">
-                              {tasks.map((task, i) => (
+                              {tasks.map((task) => (
                                 <div key={task.id} className="flex items-center gap-3 px-3 py-2.5 rounded-[12px] bg-[#f8f9f6]">
                                   <div className={`w-7 h-7 rounded-[10px] ${color.badge} flex items-center justify-center flex-shrink-0 text-white`}>
                                     <TaskIcon id={task.icon} cls="w-3.5 h-3.5" />
@@ -730,7 +1172,133 @@ export default function AdminPage() {
             })}
           </div>
         )}
+
+        {/* ── USERS TAB ── */}
+        {tab === "users" && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="rounded-[22px] bg-white px-4 py-4 border border-black/5 shadow-premium">
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-brand-dark/35">Всего</p>
+                <p className="mt-2 text-3xl font-black text-brand-dark">{users.length}</p>
+              </div>
+              <div className="rounded-[22px] bg-white px-4 py-4 border border-black/5 shadow-premium">
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-brand-dark/35">Клинеры</p>
+                <p className="mt-2 text-3xl font-black text-brand-dark">{cleaners.length}</p>
+              </div>
+              <div className="rounded-[22px] bg-white px-4 py-4 border border-black/5 shadow-premium">
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-brand-dark/35">Управление</p>
+                <p className="mt-2 text-3xl font-black text-brand-dark">{managers.length}</p>
+              </div>
+            </div>
+
+            <div className="rounded-[24px] bg-white border border-black/5 overflow-hidden shadow-[0_1px_8px_rgba(0,0,0,0.06)]">
+              {!creatingUser ? (
+                <button
+                  onClick={() => { setFormError(""); setCreatingUser(true); }}
+                  className="w-full flex items-center gap-3 px-4 py-4 text-brand-dark/50 hover:text-brand-dark transition-colors"
+                >
+                  <div className="w-8 h-8 rounded-[12px] border-2 border-dashed border-brand-dark/20 flex items-center justify-center"><PlusIcon /></div>
+                  <span className="text-sm font-black uppercase tracking-wider">Добавить сотрудника</span>
+                </button>
+              ) : (
+                <div className="p-4 space-y-3">
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-dark/40">Новый сотрудник</p>
+                  <input
+                    autoFocus
+                    value={newUserName}
+                    onChange={(e) => setNewUserName(e.target.value)}
+                    placeholder="мя сотрудника"
+                    className="w-full px-4 py-3 rounded-[16px] border-2 border-black/8 focus:border-brand-green outline-none text-sm font-semibold bg-[#fafaf8] transition-colors"
+                  />
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <input
+                      value={newUserPhone}
+                      onChange={(e) => setNewUserPhone(e.target.value)}
+                      placeholder="+7 700 000 00 00"
+                      className="w-full px-4 py-3 rounded-[16px] border-2 border-black/8 focus:border-brand-green outline-none text-sm font-semibold bg-[#fafaf8] transition-colors"
+                    />
+                    <input
+                      value={newUserIin}
+                      onChange={(e) => setNewUserIin(e.target.value.replace(/\D/g, "").slice(0, 12))}
+                      placeholder="Н, 12 цифр"
+                      className="w-full px-4 py-3 rounded-[16px] border-2 border-black/8 focus:border-brand-green outline-none text-sm font-semibold bg-[#fafaf8] transition-colors"
+                    />
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <select
+                      value={newUserRole}
+                      onChange={(e) => setNewUserRole(e.target.value)}
+                      className="w-full px-4 py-3 rounded-[16px] border-2 border-black/8 focus:border-brand-green outline-none text-sm font-black bg-[#fafaf8] transition-colors"
+                    >
+                      <option value="cleaner">Клинер</option>
+                      <option value="curator">Куратор</option>
+                      <option value="partner">Партнер</option>
+                    </select>
+                    <input
+                      value={newUserPassword}
+                      onChange={(e) => setNewUserPassword(e.target.value)}
+                      placeholder="Пароль, по умолчанию welcome123"
+                      className="w-full px-4 py-3 rounded-[16px] border-2 border-black/8 focus:border-brand-green outline-none text-sm font-semibold bg-[#fafaf8] transition-colors"
+                    />
+                  </div>
+                  {formError && <p className="text-xs font-semibold text-red-500">{formError}</p>}
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={createUser}
+                      className="flex-1 py-3 rounded-[16px] bg-brand-green text-brand-dark text-xs font-black uppercase disabled:opacity-40 hover:bg-brand-dark hover:text-white transition-all"
+                    >
+                      Создать
+                    </button>
+                    <button
+                      onClick={() => { setCreatingUser(false); setNewUserName(""); setNewUserPhone("+7 "); setNewUserIin(""); setNewUserPassword(""); setNewUserRole("cleaner"); }}
+                      className="px-5 py-3 rounded-[16px] bg-black/6 text-brand-dark/60 text-xs font-black uppercase"
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              {users.map((user) => (
+                <div key={user.id} className={`rounded-[20px] bg-white border border-black/5 px-4 py-3 shadow-[0_1px_8px_rgba(0,0,0,0.05)] ${user.status !== "active" ? "opacity-55" : ""}`}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-[14px] bg-brand-dark text-white flex items-center justify-center text-sm font-black">
+                      {user.name.slice(0, 1)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-black text-brand-dark truncate">{user.name}</p>
+                        <span className="px-2 py-0.5 rounded-full bg-brand-green/12 text-[9px] font-black uppercase tracking-[0.12em] text-brand-green">
+                          {roleLabel(user.role)}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-[0.12em] ${
+                          user.status === "active" ? "bg-brand-dark/6 text-brand-dark/45" : "bg-red-50 text-red-400"
+                        }`}>
+                          {user.status === "active" ? "Активен" : "Отключен"}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-[10px] font-semibold text-brand-dark/35">
+                        {user.phone} · Н скрыт · {user.children_count} подчиненных
+                      </p>
+                    </div>
+                    {user.status === "active" ? (
+                      <button
+                        onClick={() => deactivateUser(user.id)}
+                        className="rounded-[12px] bg-red-50 px-3 py-2 text-[10px] font-black uppercase tracking-[0.12em] text-red-400 transition hover:bg-red-100"
+                      >
+                        Отключить
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </main>
   );
 }
+

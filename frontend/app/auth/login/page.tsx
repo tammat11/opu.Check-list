@@ -3,31 +3,45 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import axios from "axios";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api";
+import { API_BASE, clearStoredAuth, fetchCurrentUser, storeAuth } from "../../lib/auth";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [step, setStep] = useState<"check" | "password" | "register" | "request">("check");
+  const [step, setStep] = useState<"check" | "password" | "setPassword" | "register" | "request">("check");
   const [phone, setPhone] = useState("+7 ");
   const [iin, setIIN] = useState("");
   const [password, setPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
   const [selectedCuratorId, setSelectedCuratorId] = useState("");
   const [curators, setCurators] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [rememberBrowser, setRememberBrowser] = useState(true);
+  const [requestMessage, setRequestMessage] = useState("Ваша заявка отправлена куратору. Как только её одобрят — вы получите уведомление.");
+
+  const redirectAfterAuth = (user: { role?: string }) => {
+    router.push(user.role === "cleaner" ? "/app/work" : "/app/dashboard");
+  };
 
   useEffect(() => {
+    fetchCurrentUser()
+      .then((user) => {
+        if (user) redirectAfterAuth(user);
+      })
+      .catch(() => {});
+
     const stored = localStorage.getItem("browserFingerprint");
     if (stored) {
       axios.post(`${API_BASE}/auth/login-remembered`, { browserFingerprint: stored })
         .then(res => {
-          localStorage.setItem("token", res.data.token);
-          router.push("/app/dashboard");
+          storeAuth(res.data.token, res.data.user);
+          redirectAfterAuth(res.data.user);
         })
-        .catch(() => {});
+        .catch(() => {
+          clearStoredAuth();
+        });
     }
   }, [router]);
 
@@ -64,17 +78,35 @@ export default function LoginPage() {
     setError("");
     try {
       const res = await axios.post(`${API_BASE}/auth/check`, { phone, iin });
+      if (res.data.exists && !res.data.requiresPassword) {
+        setStep("setPassword");
+        return;
+      }
+      if (!res.data.exists && res.data.approvalStatus === "pending") {
+        setRequestMessage("Ваша заявка уже ожидает одобрения куратором.");
+        setStep("request");
+        return;
+      }
+      if (!res.data.exists && res.data.approvalStatus === "rejected") {
+        setError(res.data.rejectionReason || "Заявка была отклонена. Обратитесь к куратору.");
+        return;
+      }
+      if (!res.data.exists) {
+        const approversRes = await axios.get(`${API_BASE}/auth/approvers`);
+        setCurators((approversRes.data.approvers || []).filter((user: any) => user.role === "curator"));
+        setStep("register");
+        return;
+      }
       if (res.data.exists) {
         setStep("password");
       } else {
         setCurators([
           { id: 1, name: "Куратор Алибек", role: "curator" },
-          { id: 2, name: "Партнер Айгерим", role: "partner" },
         ]);
         setStep("register");
       }
     } catch (err: any) {
-      setError(err.response?.data?.error || "Ошибка проверки");
+      setError(err.response?.data?.detail || err.response?.data?.error || "Ошибка проверки");
     } finally {
       setLoading(false);
     }
@@ -88,10 +120,43 @@ export default function LoginPage() {
       const fingerprint = rememberBrowser ? await generateBrowserFingerprint() : null;
       const res = await axios.post(`${API_BASE}/auth/login`, { phone, iin, password, browserFingerprint: fingerprint });
       if (fingerprint) localStorage.setItem("browserFingerprint", fingerprint);
-      localStorage.setItem("token", res.data.token);
-      router.push("/app/dashboard");
+      storeAuth(res.data.token, res.data.user);
+      redirectAfterAuth(res.data.user);
     } catch (err: any) {
-      setError(err.response?.data?.error || "Неверный пароль");
+      setError(err.response?.data?.detail || err.response?.data?.error || "Неверный пароль");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      if (newPassword.length < 6) {
+        setError("Пароль должен быть не короче 6 символов");
+        return;
+      }
+      if (newPassword !== confirmPassword) {
+        setError("Пароли не совпадают");
+        return;
+      }
+
+      await axios.post(`${API_BASE}/auth/set-password`, { phone, iin, password: newPassword });
+
+      const fingerprint = rememberBrowser ? await generateBrowserFingerprint() : null;
+      const res = await axios.post(`${API_BASE}/auth/login`, {
+        phone,
+        iin,
+        password: newPassword,
+        browserFingerprint: fingerprint,
+      });
+      if (fingerprint) localStorage.setItem("browserFingerprint", fingerprint);
+      storeAuth(res.data.token, res.data.user);
+      redirectAfterAuth(res.data.user);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.response?.data?.error || "Не удалось установить пароль");
     } finally {
       setLoading(false);
     }
@@ -103,9 +168,10 @@ export default function LoginPage() {
     setError("");
     try {
       await axios.post(`${API_BASE}/auth/register`, { phone, iin, name, selectedCuratorId: Number(selectedCuratorId) });
+      setRequestMessage("Ваша заявка отправлена куратору. Как только её одобрят — вы получите уведомление.");
       setStep("request");
     } catch (err: any) {
-      setError(err.response?.data?.error || "Ошибка регистрации");
+      setError(err.response?.data?.detail || err.response?.data?.error || "Ошибка регистрации");
     } finally {
       setLoading(false);
     }
@@ -164,15 +230,6 @@ export default function LoginPage() {
             <button type="button" onClick={() => router.push("/")} className="w-full py-3 rounded-2xl text-sm text-gray-500 hover:text-ic-dark transition-colors">
               ← На главную
             </button>
-            <div className="border-t border-gray-100 pt-4">
-              <button
-                type="button"
-                onClick={() => router.push("/app/work")}
-                className="w-full py-3 rounded-2xl text-xs text-gray-400 hover:text-ic-green transition-colors border border-dashed border-gray-200 hover:border-ic-green"
-              >
-                Демо-вход (без бэкенда) →
-              </button>
-            </div>
           </form>
         )}
 
@@ -222,6 +279,70 @@ export default function LoginPage() {
           </form>
         )}
 
+        {/* Step: create password */}
+        {step === "setPassword" && (
+          <form onSubmit={handleSetPassword} className="space-y-5 rounded-[28px] border border-black/5 bg-white p-5 shadow-premium">
+            <div className="bg-ic-green/10 rounded-2xl px-5 py-4">
+              <p className="text-sm font-bold text-ic-dark">Заявка одобрена</p>
+              <p className="mt-1 text-sm text-ic-dark/60">
+                Придумайте личный пароль для входа. Дальше система будет просить именно его.
+              </p>
+            </div>
+            <div className="bg-gray-50 rounded-2xl px-5 py-4 flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-ic-green/20 flex items-center justify-center">
+                <svg className="w-4 h-4 text-ic-green" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <span className="text-sm font-medium text-gray-700">{phone}</span>
+            </div>
+            <div>
+              <label className="block text-xs font-bold tracking-widest text-gray-500 uppercase mb-2">
+                Новый пароль
+              </label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={e => setNewPassword(e.target.value)}
+                placeholder="Минимум 6 символов"
+                className="w-full px-5 py-4 text-base border-2 border-gray-200 rounded-2xl focus:outline-none focus:border-ic-green transition-colors"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold tracking-widest text-gray-500 uppercase mb-2">
+                Повторите пароль
+              </label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                placeholder="Повторите новый пароль"
+                className="w-full px-5 py-4 text-base border-2 border-gray-200 rounded-2xl focus:outline-none focus:border-ic-green transition-colors"
+              />
+            </div>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <div
+                onClick={() => setRememberBrowser(!rememberBrowser)}
+                className={`w-11 h-6 rounded-full transition-colors flex items-center px-1 ${rememberBrowser ? "bg-ic-green" : "bg-gray-200"}`}
+              >
+                <div className={`w-4 h-4 rounded-full bg-white shadow transition-transform ${rememberBrowser ? "translate-x-5" : "translate-x-0"}`} />
+              </div>
+              <span className="text-sm text-gray-600">Запомнить этот браузер</span>
+            </label>
+            {error && <div className="bg-red-50 border border-red-100 rounded-2xl px-5 py-4 text-sm text-red-700">{error}</div>}
+            <button
+              type="submit"
+              disabled={loading || !newPassword || !confirmPassword}
+              className="w-full py-4 rounded-2xl bg-ic-dark text-white font-bold tracking-widest text-sm uppercase disabled:opacity-40 hover:bg-ic-green transition-colors"
+            >
+              {loading ? "Сохранение..." : "Сохранить и войти"}
+            </button>
+            <button type="button" onClick={() => setStep("check")} className="w-full py-3 rounded-2xl text-sm text-gray-500 hover:text-ic-dark transition-colors">
+              ← Назад
+            </button>
+          </form>
+        )}
+
         {/* Step: register */}
         {step === "register" && (
           <form onSubmit={handleRegister} className="space-y-5 rounded-[28px] border border-black/5 bg-white p-5 shadow-premium">
@@ -239,7 +360,7 @@ export default function LoginPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-bold tracking-widest text-gray-500 uppercase mb-2">Куратор / Партнёр</label>
+              <label className="block text-xs font-bold tracking-widest text-gray-500 uppercase mb-2">Куратор</label>
               <select
                 value={selectedCuratorId}
                 onChange={e => setSelectedCuratorId(e.target.value)}
@@ -276,7 +397,7 @@ export default function LoginPage() {
             <div>
               <h2 className="text-xl font-bold text-ic-dark mb-2">Заявка отправлена</h2>
               <p className="text-sm text-gray-500 leading-relaxed">
-                Ваша заявка отправлена куратору. Как только её одобрят — вы получите уведомление.
+                {requestMessage}
               </p>
             </div>
             <button onClick={() => setStep("check")} className="w-full py-4 rounded-2xl border-2 border-gray-200 text-sm font-bold tracking-widest uppercase text-gray-600 hover:border-ic-dark hover:text-ic-dark transition-colors">

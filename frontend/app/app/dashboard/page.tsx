@@ -4,6 +4,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { API_BASE, canAccessAdminPanel, fetchCurrentUser, logout as logoutUser } from "../../lib/auth";
 import {
   AppHero,
   BellIcon,
@@ -26,6 +27,22 @@ const MAP_PINS = [
 ];
 
 // ─── Demo curator data ────────────────────────────────────────────────────────
+const apiAssetUrl = (url: string) => {
+  if (!url) return "";
+  if (url.startsWith("http")) return url;
+  return `${API_BASE.replace(/\/api$/, "")}${url}`;
+};
+
+const formatDateTime = (value?: string | null) => {
+  if (!value) return "—";
+  return new Date(value).toLocaleString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
 type WorkerStatus = "done" | "ok" | "behind";
 type ObjectStatus = "done" | "ok" | "behind";
 
@@ -33,6 +50,8 @@ interface WorkerTask {
   title: string;
   zone: string;
   done: boolean;
+  photoUrl?: string | null;
+  completedAt?: string | null;
 }
 
 const ZONES = ["Санузлы", "Зал / Офис", "Коридоры", "Кухня"];
@@ -45,11 +64,25 @@ const ZONE_COLORS_TASK: Record<string, string> = {
 
 interface Worker {
   id: number;
+  userId?: number;
+  checklistId?: number;
   name: string;
   plan: number;
   fact: number;
   lastSeen: string;
   status: WorkerStatus;
+  checklistStatus?: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  dueDate?: string | null;
+  notes?: string | null;
+  photoUrls?: string[];
+  location?: {
+    lat: number;
+    lng: number;
+    accuracy?: number | null;
+    createdAt?: string | null;
+  } | null;
   tasks: WorkerTask[];
 }
 
@@ -225,7 +258,7 @@ function ObjectsTable({ objects }: { objects: CuratorObject[] }) {
 
       {objects.map((obj, idx) => {
         const cfg = STATUS_CONFIG[obj.status];
-        const pct = Math.round((obj.fact / obj.plan) * 100);
+        const pct = obj.plan ? Math.round((obj.fact / obj.plan) * 100) : 0;
         const behindCount = obj.workers.filter(w => w.status === "behind").length;
         const isOpen = openId === obj.id;
 
@@ -296,7 +329,7 @@ function ObjectsTable({ objects }: { objects: CuratorObject[] }) {
                 </div>
                 {obj.workers.map(w => {
                   const wc = WORKER_STATUS_CONFIG[w.status];
-                  const wpct = Math.round((w.fact / w.plan) * 100);
+                  const wpct = w.plan ? Math.round((w.fact / w.plan) * 100) : 0;
                   const isWorkerOpen = openWorkerId === w.id;
                   const pendingCount = w.tasks.filter(t => !t.done).length;
                   return (
@@ -336,12 +369,76 @@ function ObjectsTable({ objects }: { objects: CuratorObject[] }) {
                           (acc[t.zone] = acc[t.zone] ?? []).push(t);
                           return acc;
                         }, {});
-                        const zoneOrder = ZONES.filter(z => byZone[z]);
+                        const zoneOrder = [
+                          ...ZONES.filter(z => byZone[z]),
+                          ...Object.keys(byZone).filter(z => !ZONES.includes(z)),
+                        ];
                         return (
                           <div className="bg-white border-t border-black/4 px-3 py-2 space-y-3">
+                            <div className="rounded-[14px] border border-black/5 bg-[#fbfcf8] p-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <div>
+                                  <p className="text-[9px] font-black uppercase tracking-[0.18em] text-brand-dark/35">Отчёт смены</p>
+                                  <p className="mt-1 text-xs font-black text-brand-dark">
+                                    {w.checklistStatus || "pending"} · чек-лист #{w.checklistId ?? w.id}
+                                  </p>
+                                </div>
+                                <div className={`rounded-full px-2.5 py-1 text-[9px] font-black uppercase ${
+                                  w.status === "done" ? "bg-brand-green/12 text-brand-green" :
+                                  w.status === "behind" ? "bg-red-50 text-red-500" :
+                                  "bg-amber-50 text-amber-600"
+                                }`}>
+                                  {w.fact}/{w.plan}
+                                </div>
+                              </div>
+
+                              <div className="mt-3 grid grid-cols-2 gap-2">
+                                <div className="rounded-[12px] bg-white px-3 py-2">
+                                  <p className="text-[9px] font-black uppercase tracking-[0.14em] text-brand-dark/30">Старт</p>
+                                  <p className="mt-0.5 text-[11px] font-bold text-brand-dark/65">{formatDateTime(w.startedAt)}</p>
+                                </div>
+                                <div className="rounded-[12px] bg-white px-3 py-2">
+                                  <p className="text-[9px] font-black uppercase tracking-[0.14em] text-brand-dark/30">Финиш</p>
+                                  <p className="mt-0.5 text-[11px] font-bold text-brand-dark/65">{formatDateTime(w.completedAt)}</p>
+                                </div>
+                              </div>
+
+                              {w.location && (
+                                <div className="mt-2 rounded-[12px] bg-white px-3 py-2">
+                                  <p className="text-[9px] font-black uppercase tracking-[0.14em] text-brand-dark/30">GPS</p>
+                                  <p className="mt-0.5 text-[11px] font-bold text-brand-dark/65">
+                                    {w.location.lat.toFixed(5)}, {w.location.lng.toFixed(5)}
+                                    {w.location.accuracy ? ` · ±${Math.round(w.location.accuracy)} м` : ""}
+                                  </p>
+                                </div>
+                              )}
+
+                              {w.notes && (
+                                <div className="mt-2 rounded-[12px] bg-white px-3 py-2">
+                                  <p className="text-[9px] font-black uppercase tracking-[0.14em] text-brand-dark/30">Заметки</p>
+                                  <p className="mt-0.5 whitespace-pre-wrap text-[11px] font-semibold text-brand-dark/50">{w.notes}</p>
+                                </div>
+                              )}
+
+                              {w.photoUrls && w.photoUrls.length > 0 && (
+                                <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+                                  {w.photoUrls.map((url, photoIndex) => (
+                                    <a
+                                      key={`${url}-${photoIndex}`}
+                                      href={apiAssetUrl(url)}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="block h-16 w-16 shrink-0 overflow-hidden rounded-[14px] border border-black/5 bg-white"
+                                    >
+                                      <img src={apiAssetUrl(url)} alt="" className="h-full w-full object-cover" />
+                                    </a>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                             {zoneOrder.map(zone => (
                               <div key={zone}>
-                                <div className={`px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-wider mb-1.5 ${ZONE_COLORS_TASK[zone]}`}>
+                                <div className={`px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-wider mb-1.5 ${ZONE_COLORS_TASK[zone] || "bg-slate-100 text-slate-600"}`}>
                                   {zone}
                                 </div>
                                 <div className="space-y-1 pl-2">
@@ -354,6 +451,17 @@ function ObjectsTable({ objects }: { objects: CuratorObject[] }) {
                                         }
                                       </div>
                                       <span className={`text-[11px] font-semibold flex-1 ${t.done ? "text-brand-dark/40" : "text-red-500"}`}>{t.title}</span>
+                                      {t.photoUrl && (
+                                        <a
+                                          href={apiAssetUrl(t.photoUrl)}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          onClick={(event) => event.stopPropagation()}
+                                          className="text-[9px] font-black text-brand-green bg-brand-green/10 px-1.5 py-0.5 rounded-full"
+                                        >
+                                          фото
+                                        </a>
+                                      )}
                                       {!t.done && <span className="text-[9px] font-black text-red-400 bg-red-100 px-1.5 py-0.5 rounded-full">не сделано</span>}
                                     </div>
                                   ))}
@@ -380,12 +488,74 @@ export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<{ name: string; role: string; id: number } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [curatorObjects, setCuratorObjects] = useState<CuratorObject[]>(CURATOR_OBJECTS);
+  const [mapPins, setMapPins] = useState(MAP_PINS);
+  const [cleanerStats, setCleanerStats] = useState([
+    { label: "Смена", value: "4", sub: "активные зоны" },
+    { label: "Статус", value: "82%", sub: "средний темп" },
+    { label: "Браузер", value: "OK", sub: "устройство запомнено" },
+  ]);
+
+  const logout = async () => {
+    await logoutUser();
+    router.push("/auth/login");
+  };
 
   useEffect(() => {
-    // Demo: change role here to test views
-    setUser({ name: "Aibek", role: "curator", id: 1 });
-    setLoading(false);
+    fetchCurrentUser()
+      .then((currentUser) => {
+        if (!currentUser) {
+          router.push("/auth/login");
+          return;
+        }
+        if (currentUser.role === "cleaner") {
+          router.push("/app/work");
+          return;
+        }
+        setUser({ id: currentUser.id, name: currentUser.name, role: currentUser.role });
+      })
+      .finally(() => setLoading(false));
   }, [router]);
+
+  useEffect(() => {
+    if (!user) return;
+    const token = localStorage.getItem("token");
+    if (!token) {
+      router.push("/auth/login");
+      return;
+    }
+
+    const headers = { Authorization: `Bearer ${token}` };
+    const endpoint =
+      user.role === "admin" || user.role === "curator" || user.role === "partner"
+        ? `${API_BASE}/dashboard/curator-detailed`
+        : `${API_BASE}/dashboard/cleaner`;
+
+    fetch(endpoint, { headers })
+      .then((res) => {
+        if (res.status === 401 || res.status === 403) {
+          return logoutUser().then(() => {
+            router.push("/auth/login");
+            return null;
+          });
+        }
+        return res.json();
+      })
+      .then((data) => {
+        if (!data) return;
+        if (user.role === "admin" || user.role === "curator" || user.role === "partner") {
+          if (Array.isArray(data.objects) && data.objects.length > 0) {
+            setCuratorObjects(data.objects);
+          }
+          if (Array.isArray(data.mapPins) && data.mapPins.length > 0) {
+            setMapPins(data.mapPins);
+          }
+        } else if (Array.isArray(data.stats)) {
+          setCleanerStats(data.stats);
+        }
+      })
+      .catch(() => {});
+  }, [router, user]);
 
   if (loading) {
     return (
@@ -395,16 +565,16 @@ export default function DashboardPage() {
     );
   }
 
-  const isCurator = user?.role === "curator" || user?.role === "partner";
+  const isCurator = user?.role === "admin" || user?.role === "curator" || user?.role === "partner";
 
   // ── Curator dashboard ──────────────────────────────────────────────────────
   if (isCurator) {
-    const totalPlan   = CURATOR_OBJECTS.reduce((s, o) => s + o.plan, 0);
-    const totalFact   = CURATOR_OBJECTS.reduce((s, o) => s + o.fact, 0);
-    const behindObjs  = CURATOR_OBJECTS.filter(o => o.status === "behind").length;
-    const doneObjs    = CURATOR_OBJECTS.filter(o => o.status === "done").length;
-    const totalWorkers = CURATOR_OBJECTS.reduce((s, o) => s + o.workers.length, 0);
-    const behindWorkers = CURATOR_OBJECTS.flatMap(o => o.workers).filter(w => w.status === "behind").length;
+    const totalPlan   = curatorObjects.reduce((s, o) => s + o.plan, 0);
+    const totalFact   = curatorObjects.reduce((s, o) => s + o.fact, 0);
+    const behindObjs  = curatorObjects.filter(o => o.status === "behind").length;
+    const doneObjs    = curatorObjects.filter(o => o.status === "done").length;
+    const totalWorkers = curatorObjects.reduce((s, o) => s + o.workers.length, 0);
+    const behindWorkers = curatorObjects.flatMap(o => o.workers).filter(w => w.status === "behind").length;
     const overallPct  = Math.round((totalFact / totalPlan) * 100);
 
     return (
@@ -438,7 +608,7 @@ export default function DashboardPage() {
             <div className="mt-3 flex gap-2 flex-wrap">
               <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black text-white/70 bg-white/10">
                 <span className="w-1.5 h-1.5 rounded-full bg-white/50" />
-                {CURATOR_OBJECTS.length} объектов
+                {curatorObjects.length} объектов
               </span>
               <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black text-white/70 bg-white/10">
                 <span className="w-1.5 h-1.5 rounded-full bg-brand-green" />
@@ -475,7 +645,7 @@ export default function DashboardPage() {
           {/* Objects table */}
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-dark/35 mb-2 px-1">Мои объекты</p>
-            <ObjectsTable objects={CURATOR_OBJECTS} />
+            <ObjectsTable objects={curatorObjects} />
           </div>
 
           {/* Map */}
@@ -483,30 +653,32 @@ export default function DashboardPage() {
             <div className="px-4 pt-4 pb-3 flex items-center justify-between">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-dark/35">Объекты на карте</p>
-                <p className="text-base font-black text-brand-dark mt-0.5">Алматы · {CURATOR_OBJECTS.length} адресов</p>
+                <p className="text-base font-black text-brand-dark mt-0.5">Актуальные адреса · {curatorObjects.length}</p>
               </div>
               <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-[12px] bg-red-50 text-[11px] font-black text-red-500">
                 <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
                 {behindObjs} в красном
               </span>
             </div>
-            <MapView pins={MAP_PINS} center={[43.245, 76.920]} zoom={12} className="h-[240px] w-full" />
+            <MapView pins={mapPins} center={[51.1282, 71.4304]} zoom={12} className="h-[240px] w-full" />
           </div>
 
           {/* Admin link + logout */}
-          <div className="grid grid-cols-2 gap-3">
-            <Link href="/app/admin"
-              className="flex items-center gap-3 rounded-[20px] border border-black/5 bg-white px-4 py-4 shadow-premium hover:-translate-y-0.5 transition-all">
-              <div className="w-9 h-9 rounded-[12px] bg-brand-dark flex items-center justify-center flex-shrink-0">
-                <UsersIcon cls="w-4 h-4 text-white" />
-              </div>
-              <div>
-                <p className="text-sm font-black text-brand-dark">Админка</p>
-                <p className="text-[10px] text-brand-dark/40 font-semibold">Чек-листы, адреса</p>
-              </div>
-            </Link>
+          <div className={`grid gap-3 ${canAccessAdminPanel(user?.role) ? "grid-cols-2" : "grid-cols-1"}`}>
+            {canAccessAdminPanel(user?.role) ? (
+              <Link href="/app/admin"
+                className="flex items-center gap-3 rounded-[20px] border border-black/5 bg-white px-4 py-4 shadow-premium hover:-translate-y-0.5 transition-all">
+                <div className="w-9 h-9 rounded-[12px] bg-brand-dark flex items-center justify-center flex-shrink-0">
+                  <UsersIcon cls="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <p className="text-sm font-black text-brand-dark">Админка</p>
+                  <p className="text-[10px] text-brand-dark/40 font-semibold">Чек-листы, адреса</p>
+                </div>
+              </Link>
+            ) : null}
             <button
-              onClick={() => { localStorage.removeItem("token"); router.push("/auth/login"); }}
+              onClick={logout}
               className="flex items-center gap-3 rounded-[20px] border border-black/5 bg-white px-4 py-4 shadow-premium hover:border-red-200 transition-all text-left">
               <div className="w-9 h-9 rounded-[12px] bg-black/6 flex items-center justify-center flex-shrink-0">
                 <svg className="w-4 h-4 text-brand-dark/40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -539,9 +711,9 @@ export default function DashboardPage() {
         />
 
         <div className="mt-4 grid grid-cols-3 gap-3">
-          <StatCard label="Смена" value="4" sub="активные зоны" />
-          <StatCard label="Статус" value="82%" sub="средний темп" />
-          <StatCard label="Браузер" value="OK" sub="устройство запомнено" />
+          {cleanerStats.map((stat) => (
+            <StatCard key={stat.label} label={stat.label} value={stat.value} sub={stat.sub} />
+          ))}
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -582,7 +754,7 @@ export default function DashboardPage() {
               5 объектов
             </span>
           </div>
-          <MapView pins={MAP_PINS} center={[43.245, 76.920]} zoom={12} className="h-[260px] w-full" />
+          <MapView pins={mapPins} center={[51.1282, 71.4304]} zoom={12} className="h-[260px] w-full" />
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-3">
@@ -601,7 +773,7 @@ export default function DashboardPage() {
             <p className="mt-3 text-sm font-semibold text-brand-dark">Сегодня удобно стартовать с санузлов и коридоров.</p>
           </div>
           <button
-            onClick={() => { localStorage.removeItem("token"); router.push("/auth/login"); }}
+            onClick={logout}
             className="rounded-[24px] border border-black/5 bg-white p-4 text-left shadow-premium transition hover:border-brand-dark/15">
             <span className="text-[10px] font-black uppercase tracking-[0.18em] text-brand-dark/35">Сессия</span>
             <p className="mt-3 text-sm font-semibold text-brand-dark">Выйти из аккаунта</p>
